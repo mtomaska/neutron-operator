@@ -851,25 +851,29 @@ func (r *NeutronAPIReconciler) reconcileNormal(ctx context.Context, instance *ne
 	//
 	// check for required OpenStack secret holding passwords for service/admin user and add hash to the vars map,
 	//
-	ospSecret, hash, err := secret.GetSecret(ctx, helper, instance.Spec.Secret, instance.Namespace)
+	hash, secretResult, err := secret.VerifySecret(
+		ctx,
+		types.NamespacedName{Name: instance.Spec.Secret, Namespace: instance.Namespace},
+		[]string{mariadbv1.DatabasePasswordSelector},
+		r.Client,
+		time.Duration(10)*time.Second,
+	)
 	if err != nil {
 		if k8s_errors.IsNotFound(err) {
-			instance.Status.Conditions.Set(condition.FalseCondition(
-				condition.InputReadyCondition,
-				condition.RequestedReason,
-				condition.SeverityInfo,
-				condition.InputReadyWaitingMessage))
-			return ctrl.Result{RequeueAfter: time.Duration(10) * time.Second}, fmt.Errorf("OpenStack secret %s not found", instance.Spec.Secret)
+			return secretResult, fmt.Errorf("OpenStack secret %s not found", instance.Spec.Secret)
 		}
+
 		instance.Status.Conditions.Set(condition.FalseCondition(
 			condition.InputReadyCondition,
 			condition.ErrorReason,
 			condition.SeverityWarning,
 			condition.InputReadyErrorMessage,
 			err.Error()))
+
 		return ctrl.Result{}, err
 	}
-	secretVars[ospSecret.Name] = env.SetValue(hash)
+	// FIXME(Miro): Is setting key to instance.Spec.Secret, correct?
+	secretVars[instance.Spec.Secret] = env.SetValue(hash)
 
 	instance.Status.Conditions.MarkTrue(condition.InputReadyCondition, condition.InputReadyMessage)
 	// run check OpenStack secret - end
